@@ -1,0 +1,93 @@
+#define USING_OPENCV
+
+#include <iostream>
+#include <cuda_runtime.h>
+#include <stim/image/image.h>
+#include "device_launch_parameters.h"
+#include <fstream>
+#include <ctime>
+
+
+using std::cerr;
+using std::cout;
+using std::endl;
+using std::ifstream;
+
+
+void handleError (cudaError_t error, const char* text){
+
+	if(error != cudaSuccess){
+		cout << "ERROR " << text << endl;
+		exit(1);
+	}
+}
+
+
+
+int main(int argc, char *argv[]){
+
+
+
+		
+		unsigned int rows = 0;
+		unsigned int cols = 0;
+
+
+		ifstream infile;												// to read the matrix 
+
+		infile.open(argv[1], std::ios::in | std::ios::binary);		// open as binary input file
+
+		if(infile.fail()){											// check for error in opening the file
+			cerr << "ERROR opening the first file" << endl;
+			exit(1);
+		}
+
+		infile.read((char*)&rows, sizeof(unsigned int));				// assuming the first value is number of rows
+		infile.read((char*)&cols, sizeof(unsigned int));				// assuming the second value is the number of columns
+
+		float* A = (float*) malloc (rows * cols * sizeof(float));				// allocate memory for the matrix
+		infile.read( (char*)A , sizeof(float) * rows * cols);			// read and copy the data to the memory
+
+		infile.close();
+
+
+
+		ifstream in;												// to read the matrix 
+
+		in.open(argv[2], std::ios::in | std::ios::binary);		// open as binary input file
+
+		if(in.fail()){											// check for error in opening the file
+			cerr << "ERROR opening the first file" << endl;
+			exit(1);
+		}
+
+		in.read((char*)&rows, sizeof(unsigned int));				// assuming the first value is number of rows
+		in.read((char*)&cols, sizeof(unsigned int));				// assuming the second value is the number of columns
+
+		float* B = (float*) malloc (rows * cols * sizeof(float));				// allocate memory for the matrix
+		in.read( (char*)B , sizeof(float) * rows * cols);			// read and copy the data to the memory
+
+		in.close();
+
+
+
+
+	float* C = (float*) malloc (rows * cols * sizeof(float));					// allocate memory for A * B
+
+	float temp = 0;
+
+	for(int i = 0 ; i < rows ; i++){                                                 // using matrix A as reference to assign the indices
+		for(int rowIdxA = 0 ; rowIdxA < rows ; rowIdxA++){                               
+			for(int colIdxA = 0 ; colIdxA < cols ; colIdxA++){
+				   temp +=   A[colIdxA * rows + rowIdxA]   *    B[colIdxA + cols * i];
+			}
+			C[i * rows + rowIdxA] = temp;
+			temp = 0;
+		}
+	}
+
+
+
+
+	return 0;
+}

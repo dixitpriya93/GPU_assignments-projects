@@ -1,0 +1,284 @@
+// ConsoleApplication1.cpp : Defines the entry point for the console application.
+//
+
+#include "stdafx.h"
+#include<iostream>
+#include<fstream>
+#include<string>
+#include <ctime>
+using namespace std;
+
+void read_file(string filename);
+void convolve_xdim(unsigned char* input_img, unsigned char* convolved_img, float* img_ptr, int conv_idx, size_t cols, size_t rows);
+void convolve_ydim(unsigned char* input_img, unsigned char* convolved_img, float* img_ptr, int conv_idx, size_t cols, size_t rows);
+void RGB_components(unsigned char * R, unsigned char * G, unsigned char *B, unsigned char *stored_img, int pix_cnt);
+int main()
+{
+	double start_timer = std::clock();
+
+	std::string input_filename;
+	cin >> input_filename;
+	read_file(input_filename);
+
+	int sigma;
+	cout << "enter the value of sigma:\t" << endl;
+	cin >> sigma;
+	int window_size = 4 * sigma + 1;
+
+	float * kernel = (float*)calloc(window_size, sizeof(float));
+	int window_idx = ceil(window_size / 2);
+	kernel = kernel + window_idx;
+	int f = -window_idx;
+	while (f <= window_idx)
+	{
+		int num = exp(-0.5 * pow(f / sigma, 2));
+		int den = sigma * sqrt(2 * 3.14);
+		kernel[f] = num / den;
+		f++;
+	}
+
+	unsigned char* output_red = (unsigned char*)calloc(img_Size, sizeof(unsigned char));
+	convolve_xdim(unsigned char* input_red, unsigned char* convolved_red, float* img_ptr, int conv_idx, size_t cols, size_t rows);
+	convolve_ydim(unsigned char* input_red, unsigned char* convolved_red, float* img_ptr, int conv_idx, size_t cols, size_t rows);
+
+	unsigned char* output_green = (unsigned char*)calloc(img_Size, sizeof(unsigned char));
+	convolve_xdim(unsigned char* input_green, unsigned char* convolved_red, float* img_ptr, int conv_idx, size_t cols, size_t rows);
+	convolve_ydim(unsigned char* input_green, unsigned char* convolved_red, float* img_ptr, int conv_idx, size_t cols, size_t rows);
+	
+	unsigned char* output_blue = (unsigned char*)calloc(img_Size, sizeof(unsigned char));
+	convolve_xdim(unsigned char* input_blue, unsigned char* convolved_red, float* img_ptr, int conv_idx, size_t cols, size_t rows);
+	convolve_ydim(unsigned char* input_blue, unsigned char* convolved_red, float* img_ptr, int conv_idx, size_t cols, size_t rows);
+	
+	unsigned char* output = (unsigned char*)malloc(img_Size * chnls * sizeof(unsigned char));			
+
+	RGB_components(convolve_red, convolve_green, convolve_blue, color_output, img_Size);
+	
+	double stop_timer = std::clock();
+	cout << "total time taken:\t" << (stop_timer - start_timer) / ((double)CLOCKS_PER_SEC) << "secs" << endl;
+	return 0;
+}
+void read_file(string filename)
+{
+
+	ifstream file(filename, std::ios::in | std::ios::binary);
+	if (!file) {
+		std::cout << "Error opening input file in image::load_netpbm()" << std::endl;
+		exit(1);
+	}
+	if (file.is_open())
+	{
+		cout << "Name of the file:\t" << filename << '\n';
+
+		char format[2];												//allocate space to hold the image format tag
+		file.read(format, 2);										//read the image format tag
+		file.seekg(1, std::ios::cur);								//skip the newline character
+
+		if (format[0] == 'P' && format[1] == '6')
+		{
+			cout << "Correct format image file:\t" << format[0] << format[1] << endl;
+
+		}
+		else
+		{
+			cout << "Error in image::load_netpbm() - file format tag is invalid: " << format[0] << format[1] << std::endl;
+			exit(1);
+		}
+
+
+		unsigned char c;								//stores a character
+		while (file.peek() == '#') {					//if the next character indicates the start of a comment
+			while (true) {
+				c = file.get();
+				if (c == 0x0A) break;
+			}
+		}
+		std::string sw;									//create a string to store the width of the image
+		while (true) {
+			c = file.get();							//get a single character
+			if (c == ' ') break;						//exit if we've encountered a space
+			sw.push_back(c);							//push the character on to the string
+		}
+		size_t w = atoi(sw.c_str());					//convert the string into an integer
+		cout << "Width of Image:\t" << w << endl;
+
+		std::string sh;
+		while (true) {
+			c = file.get();
+			if (c == 0x0A) break;
+			sh.push_back(c);
+		}
+
+		size_t h = atoi(sh.c_str());					//convert the string into an integer
+		cout << "Height of Image: " << h << endl;
+
+		std::string sints;
+		while (true) {
+			c = file.get();
+			if (c == 0x0A) break;
+			sints.push_back(c);
+		}
+
+		size_t ints = atoi(sints.c_str());
+		cout << "Maximum Intensity of Image: " << ints << endl;
+
+		getline(file, line);
+		getline(file, line);
+
+		char pixel_idx;
+		size_t img_Size = cols * rows;
+
+		unsigned char* red = (unsigned char*)malloc(img_Size * sizeof(unsigned char));			// allocating memory for each of the RGB components
+		unsigned char* green = (unsigned char*)malloc(img_Size * sizeof(unsigned char));
+		unsigned char* blue = (unsigned char*)malloc(img_Size * sizeof(unsigned char));
+
+		for (size_t i = 0; i < img_Size; i++) {
+
+			file.get(pixel_idx);
+			red[i] = pixel_idx;				// red channel
+
+			file.get(pixel_idx);             // green channel
+			green[i] = pixel_idx;
+
+			file.get(pixel_idx);				// blue channel
+			blue[i] = pixel_idx;
+
+			file.close();
+
+		}
+	}
+void convolve_xdim(unsigned char* input_img, unsigned char* convolved_img, float* img_ptr, int conv_idx, size_t cols, size_t rows)
+{
+	size_t ximg_size = cols * rows;
+	float load = 0;
+	int offset = 0;
+	int cidx = 0;
+
+	for (int a = 0; a < ximg_size; a++)
+	{
+		cidx = a % cols;
+		if (cidx == cols)
+		{
+			cidx == 0;
+		}
+		if (cidx < conv_idx)						//if the image index is nearer to the left edge of the image 
+		{
+			int b = -cidx;
+			while (b <= conv_idx)
+			{
+				load += input_img[b] * convolved_img[b];
+				b++;
+			}
+			convolved_img[a] = load;
+			input_img++;
+			load = 0;
+		}
+		else if (cidx > cols - conv_idx)			//if the image index is nearer to the right edge of the image
+		{
+			offset = cols - cidx - 1;
+			int b = -conv_idx;
+			while (b <= offset)
+			{
+				load += input_img[b] * convolved_img[b];
+				b++;
+			}
+			convolved_img[a] = load;
+			input_img++;
+			load = 0;
+		}
+		else
+		{
+			int b = -conv_idx;
+			while (b <= conv_idx)								// image index far from either edges condition
+			{
+				load += input_img[b] * convolved_img[b];
+				b++;
+			}
+			convolved_img[a] = load;
+			input_img++;
+			load = 0;
+		}
+	}
+	input_img = input_img - ximg_size;
+}
+
+void convolve_ydim(unsigned char* input_img, unsigned char* convolved_img, float* img_ptr, int conv_idx, size_t cols, size_t rows)
+{
+	size_t yimg_size = cols * rows;
+	float load = 0;
+	int offset = 0;
+	int ridx = 0;
+
+	for (int c = 0; c < yimg_size; c++)
+	{
+		ridx = c / cols;
+
+		if (ridx < conv_idx)						//if the image index is nearer to the left edge of the image 
+		{
+			int d = -ridx;
+			while (d <= conv_idx)
+			{
+				load += input_img[d*cols] * convolved_img[d];
+				d++;
+			}
+			convolved_img[c] = load;
+			input_img++;
+			load = 0;
+		}
+		else if (ridx > rows - conv_idx)			//if the image index is nearer to the right edge of the image
+		{
+			offset = rows - ridx - 1;
+			int d = -conv_idx;
+			while (d <= offset)
+			{
+				load += input_img[d*cols] * convolved_img[d];
+				d++;
+			}
+			convolved_img[c] = load;
+			input_img++;
+			load = 0;
+		}
+		else
+		{
+			int d = -conv_idx;
+			while (d <= conv_idx)								// image index far from either edges condition
+			{
+				load += input_img[d*cols] * convolved_img[d];
+				d++;
+			}
+			convolved_img[c] = load;
+			input_img++;
+			load = 0;
+		}
+	}
+	input_img = input_img - yimg_size;
+
+}
+
+void RGB_components(unsigned char * R, unsigned char * G, unsigned char *B, unsigned char *stored_img, int pix_cnt)
+{
+	int e = 0;
+	int idx = 0;												
+	while (idx < pix_cnt)
+	{
+		e = 3 * idx;
+		stored_img[e] = R[idx];
+		stored_img[e + 1] = G[idx];						//Separating the r, g, b components from the image.
+		stored_img[e + 2] = B[idx];
+		idx++;
+	}
+}
+void write_Image::write(std::string filename, const Image & src) 
+{
+		Image img(src);
+		char* buffer = (char*)img.getRawDataPtr();
+		ofstream file;
+		file.open(filename, ios::out, ios::binary);
+		file << "P6\n";
+		file << img.getWidth() << endl;
+		file << img.getHeight() << endl;
+		file << "255" << endl;
+		file.write(buffer, img.getHeight()*img.getWidth() * 3);
+}
+
+
+		

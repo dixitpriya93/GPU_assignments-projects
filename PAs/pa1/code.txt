@@ -1,0 +1,680 @@
+//#define USING_OPENCV
+
+#include <iostream>
+//#include <stim/image/image.h>
+#include <fstream>
+#include <ctime>
+
+
+using std::cout;
+using std::endl;
+using std::ifstream;
+
+#define PI 3.1416
+
+//===================== convolution function across X dimension =====================//
+
+void convolutionAcrossX (unsigned char* channelPtr, float* kernelPtr, unsigned char* convolvedPtr, size_t numOfCols, size_t numOfRows, int kernelMiddleIndex){
+
+	int diff = 0;
+	size_t colIndex = 0;
+	float temp = 0;
+	int n = 0;
+	size_t channTotNumOfPix = numOfCols * numOfRows;
+
+	for(size_t p = 0 ; p < channTotNumOfPix ; p++){
+		
+		colIndex = p % numOfCols;						// getting the index of each column to perform convolution correctly once close to the edges
+		if (colIndex == numOfCols)                      // make sure to get the right column index since the image is stored as a 1D array in memory
+			colIndex = 0;
+
+
+		if(colIndex <= kernelMiddleIndex){                 // if close to the image's left edge
+			n = - colIndex;
+				for( n  ; n <= kernelMiddleIndex ; n++)
+					temp += channelPtr[n] * kernelPtr[n];       // perform convolution along X axis
+			convolvedPtr[p] = temp;                            // store the value of the convolved pixel under the output pointer 
+			channelPtr++;                                          // increment the pointer of the channel to keep up with the center of the kernel as kernel slide across the image
+			temp = 0;
+		}
+
+		else if (colIndex >= numOfCols - kernelMiddleIndex){               // if close to the right edge of the image
+			diff = numOfCols - colIndex - 1;
+				for( n = - kernelMiddleIndex  ; n <= diff ; n++)
+					temp += channelPtr[n] * kernelPtr[n];
+			convolvedPtr[p] = temp;                                      
+			channelPtr++;
+			temp = 0;
+		}
+
+
+		else{                                                                  // if not close to the edges
+			for( n = - kernelMiddleIndex  ; n <= kernelMiddleIndex ; n++)
+				temp += channelPtr[n] * kernelPtr[n];
+			convolvedPtr[p] = temp;
+			channelPtr++;
+			temp = 0;
+		}
+
+	}
+	channelPtr -= channTotNumOfPix;                      // move the channel's pointer that you incremented to keep up with the kernel increments, back to its original position
+}
+
+
+//===================== convolution function across Y dimension =====================//
+
+void convolutionAcrossY (unsigned char* chnlPtr, float* filterPtr, unsigned char* convolvedPointer, size_t numOfColumns, size_t numberOfRows, int filterMiddleIndex){
+
+	int subtraction = 0;
+	size_t rowIndex = 0;
+	float tmp = 0;
+	int m = 0;
+	size_t channelPixelSize = numOfColumns * numberOfRows;
+
+	for(size_t pixIndex = 0 ; pixIndex < channelPixelSize ; pixIndex++){
+
+		rowIndex = pixIndex / numOfColumns;									 // getting the index of each row to perform convolution correctly once close to the edges
+
+		if (rowIndex <= filterMiddleIndex)	{                                // if close to the top of the image
+			m = - rowIndex;
+				for( m  ; m <= filterMiddleIndex ; m++)
+					tmp += chnlPtr[m * numOfColumns] * filterPtr[m];		// perform convolution along Y axis
+			convolvedPointer[pixIndex] = tmp;								// store the value of the convolved pixel under the output pointer 
+			chnlPtr++;														// increment the pointer of the channel to keep up with the center of the kernel as kernel slide across the image
+			tmp = 0;
+		}
+			
+		else if( rowIndex >= numberOfRows - filterMiddleIndex ){             // if close to the bottom of the image
+			subtraction = numberOfRows - rowIndex - 1;
+				for( m = - filterMiddleIndex  ; m <= subtraction ; m++)
+					tmp += chnlPtr[m * numOfColumns] * filterPtr[m];
+			convolvedPointer[pixIndex] = tmp;
+			chnlPtr++;
+			tmp = 0;
+		}
+
+
+		else{                                                                // if not close to the edges
+			for( m = - filterMiddleIndex  ; m <= filterMiddleIndex ; m++)
+				tmp += chnlPtr[m * numOfColumns] * filterPtr[m];
+			convolvedPointer[pixIndex] = tmp;
+			chnlPtr++;
+			tmp = 0;
+		}
+
+	}
+	chnlPtr -= channelPixelSize;                                           // move the channel's pointer that you incremented to keep up with the kernel increments, back to its original position
+}
+
+
+void separateChannelsToRGBinterleaved (unsigned char* r, unsigned char* g, unsigned char*b, unsigned char* interleaved, size_t channelPixels){    // get each channel and then interleave them in RGB order
+
+	size_t s = 0;
+	for(size_t idx = 0 ; idx < channelPixels  ; idx++){
+		s = idx * 3;
+		interleaved[s]	 = r[idx];
+		interleaved[s+1] = g[idx];
+		interleaved[s+2] = b[idx];
+	}
+}
+
+
+void main(int argc, char** argv){
+
+  //==================================== parse the ppm file and store each channel in memory ====================================//
+
+	ifstream infile;
+	infile.open( argv[1] , std::ios::in | std::ios::binary );   // open the binary file
+
+	if(infile.fail()){
+		std::cerr << "ERROR opening the ppm file" << endl;
+		exit(1);
+	}
+
+	unsigned int chnls = 0;				
+	std::string strReader = "";					// to read the type of file
+
+	infile >> strReader;
+
+	if(strReader == "P6")					// color image
+		chnls = 3;
+
+	else{
+		std::cerr << "Your ppm file is not supported by this project. Only P6 file type is supported " << endl;
+		exit(1);
+	}
+
+	std::string line;			// used to move the cursor to the next line when necessary
+	getline(infile,line);   // move the cursor to line 2
+	getline(infile,line);   // move the cursor to line 3
+
+	size_t cols;
+	size_t rows;
+
+	infile >> cols >> rows;   // get the number of columns and rows from the ppm file
+
+	getline(infile,line);		// move the cursor to line 4
+	getline(infile,line);		// move the cursor to line 5
+
+	char pixVal;
+	size_t twoDimSize = cols * rows;		// total num of pixels for each channel
+
+	unsigned char* red = (unsigned char*) malloc ( twoDimSize * sizeof(unsigned char) );			// allocating memory for each channel
+	unsigned char* green = (unsigned char*) malloc ( twoDimSize * sizeof(unsigned char) );
+	unsigned char* blue = (unsigned char*) malloc ( twoDimSize * sizeof(unsigned char) );
+
+	for(size_t i = 0 ; i < twoDimSize ; i++){
+
+		infile.get(pixVal);				// this function accepts only char type as input argument (I'm using this function because for some super weird reasons the operator ">>" skips reading the value 9)
+		red[i] = pixVal;				// first casts to unsinged char then stores the value
+
+		infile.get(pixVal);             // green channel
+		green[i] = pixVal;		
+
+		infile.get(pixVal);				// blue channel
+		blue[i] = pixVal;		
+	}
+
+	infile.close();
+
+
+	//=================================================== write the filter ===================================================//
+
+
+	int sigma = atoi(argv[2]);					// since we're dealing with digital framework we assume sigma is always an integer
+	int kSize = sigma * 6 + 1;		// to keep 99.7% of the Gaussian and make it odd
+
+	float* k = (float*) calloc (kSize, sizeof(float));  // allocate memory for the kernel
+
+	int kMidIdx = ceil( kSize/2 );			// get the middle pixel index of the kernel
+	k += kMidIdx;								// move the pointer to the middle pixel of the kernel (to make the kernel index the same as the values we insert in the Gaussian formula)
+
+	float GaussNumerator = 0;
+	float GaussDenom = 0;
+	for(int j = -kMidIdx ; j <= kMidIdx ; j++){                 // calculating the Gaussian kernel
+
+		GaussNumerator = exp( -0.5 * pow( j/(double)sigma, 2 ) );
+		GaussDenom = sigma * sqrt(2*PI);
+		k[j] = GaussNumerator / GaussDenom;
+	}
+
+
+	//=================================================== perform convolution ===================================================//
+
+	double startCl = std::clock();                     // set the clock to start at this point
+
+
+	//========== convolve red channel
+	unsigned char* redConvolved = (unsigned char*) calloc ( twoDimSize, sizeof(unsigned char) );	
+	
+	convolutionAcrossX (red, k, redConvolved, cols, rows, kMidIdx);								    // across X
+	convolutionAcrossY (redConvolved, k, redConvolved, cols, rows, kMidIdx);						// across Y  (I'm overwriting the convolution result across X by the results across Y dimension to save some space in memory)
+
+
+
+	//========== convolve green channel
+	unsigned char* greenConvolved = (unsigned char*) calloc ( twoDimSize, sizeof(unsigned char) );	
+
+	convolutionAcrossX (green, k, greenConvolved, cols, rows, kMidIdx);										 // across X
+	convolutionAcrossY (greenConvolved, k, greenConvolved, cols, rows, kMidIdx);							 // across Y
+
+
+
+	//========== convolve blue channel
+	unsigned char* blueConvolved = (unsigned char*) calloc ( twoDimSize, sizeof(unsigned char) );	
+
+	convolutionAcrossX (blue, k, blueConvolved, cols, rows, kMidIdx);										// across X
+	convolutionAcrossY (blueConvolved, k, blueConvolved, cols, rows, kMidIdx);								// across Y
+
+
+	double endCl = std::clock();							// set the clock to end at this time
+
+
+	cout << endl << "convolution took approximately " << (endCl - startCl) /((double) CLOCKS_PER_SEC)<< " seconds" << endl;		 // calculate the convolution time in seconds
+
+	//=========================================== create the convolved color image an save it =======================//
+
+	unsigned char* colorConvolved = (unsigned char*) malloc (twoDimSize * chnls * sizeof(unsigned char));			// allocate memory for the convolved color image
+	
+	separateChannelsToRGBinterleaved ( redConvolved, greenConvolved, blueConvolved, colorConvolved, twoDimSize);	// interleave the convolved channels
+
+//	stim::image<unsigned char> finalImage (colorConvolved, cols, rows, chnls);										// create an image and save it
+//	finalImage.save("convolvedColorImage.bmp");
+
+//	cout << endl << "your final image was created under the name 'convolvedColorImage'"  << endl;
+
+
+	free(red);
+	free(green);
+	free(blue);
+	free(k);
+	free(redConvolved);
+	free(greenConvolved);
+	free(blueConvolved);
+	free(colorConvolved);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+gpu:
+
+
+
+
+
+
+
+
+
+#define USING_OPENCV
+
+#include <iostream>
+#include <cuda_runtime.h>
+#include <stim/image/image.h>
+#include "device_launch_parameters.h"
+#include <fstream>
+#include <ctime>
+
+
+using std::cout;
+using std::endl;
+using std::ifstream;
+
+#define PI 3.1416
+
+
+void handleError (cudaError_t error, const char* text){
+
+	if(error != cudaSuccess){
+		cout << "ERROR " << text << endl;
+		exit(1);
+	}
+}
+
+
+//===================== convolution function across X dimension =====================//
+
+__global__ void kernelConvolutionAcrossX (unsigned char* channelPtr, float* kernelPtr, unsigned char* convolvedPtr, size_t numOfCols, size_t numOfRows, int kernelMiddleIndex){
+
+
+	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+	size_t channTotNumOfPix = numOfCols * numOfRows;
+
+	if(idx >= channTotNumOfPix)
+		return;
+
+	int diff = 0;
+	size_t colIndex = 0;
+	float temp = 0;
+	int n = 0;
+	
+		colIndex = idx % numOfCols;						// getting the index of each column to perform convolution correctly once close to the edges
+		if (colIndex == numOfCols)                      // make sure to get the right column index since the image is stored as a 1D array in memory
+			colIndex = 0;
+
+
+		if(colIndex <= kernelMiddleIndex){                 // if close to the image's left edge
+			n = - colIndex;
+				for( n  ; n <= kernelMiddleIndex ; n++)
+					temp += channelPtr[n] * kernelPtr[n];       // perform convolution along X axis
+			convolvedPtr[idx] = temp;                            // store the value of the convolved pixel under the output pointer 
+			channelPtr++;                                          // increment the pointer of the channel to keep up with the center of the kernel as kernel slide across the image
+			temp = 0;
+		}
+
+		else if (colIndex >= numOfCols - kernelMiddleIndex){               // if close to the right edge of the image
+			diff = numOfCols - colIndex - 1;
+				for( n = - kernelMiddleIndex  ; n <= diff ; n++)
+					temp += channelPtr[n] * kernelPtr[n];
+			convolvedPtr[idx] = temp;                                      
+			channelPtr++;
+			temp = 0;
+		}
+
+
+		else{                                                                  // if not close to the edges
+			for( n = - kernelMiddleIndex  ; n <= kernelMiddleIndex ; n++)
+				temp += channelPtr[n] * kernelPtr[n];
+			convolvedPtr[idx] = temp;
+			channelPtr++;
+			temp = 0;
+		}
+		channelPtr -= channTotNumOfPix;                      // move the channel's pointer that you incremented to keep up with the kernel increments, back to its original position
+		
+	}
+
+
+//===================== convolution function across Y dimension =====================//
+
+__global__ void kernelConvolutionAcrossY (unsigned char* chnlPtr, float* filterPtr, unsigned char* convolvedPointer, size_t numOfColumns, size_t numberOfRows, int filterMiddleIndex){
+
+	int subtraction = 0;
+	size_t rowIndex = 0;
+	float tmp = 0;
+	int m = 0;
+	size_t channelPixelSize = numOfColumns * numberOfRows;
+
+	size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+	if(index >= channelPixelSize)
+		return;
+
+
+		rowIndex = index / numOfColumns;									 // getting the index of each row to perform convolution correctly once close to the edges
+
+		if (rowIndex <= filterMiddleIndex)	{                                // if close to the top of the image
+			m = - rowIndex;
+				for( m  ; m <= filterMiddleIndex ; m++)
+					tmp += chnlPtr[m * numOfColumns] * filterPtr[m];		// perform convolution along Y axis
+			convolvedPointer[index] = tmp;								// store the value of the convolved pixel under the output pointer 
+			chnlPtr++;														// increment the pointer of the channel to keep up with the center of the kernel as kernel slide across the image
+			tmp = 0;
+		}
+			
+		else if( rowIndex >= numberOfRows - filterMiddleIndex ){             // if close to the bottom of the image
+			subtraction = numberOfRows - rowIndex - 1;
+				for( m = - filterMiddleIndex  ; m <= subtraction ; m++)
+					tmp += chnlPtr[m * numOfColumns] * filterPtr[m];
+			convolvedPointer[index] = tmp;
+			chnlPtr++;
+			tmp = 0;
+		}
+
+
+		else{                                                                // if not close to the edges
+			for( m = - filterMiddleIndex  ; m <= filterMiddleIndex ; m++)
+				tmp += chnlPtr[m * numOfColumns] * filterPtr[m];
+			convolvedPointer[index] = tmp;
+			chnlPtr++;
+			tmp = 0;
+		}
+		chnlPtr -= channelPixelSize;                                           // move the channel's pointer that you incremented to keep up with the kernel increments, back to its original position
+
+		
+	}
+	
+
+
+void separateChannelsToRGBinterleaved (unsigned char* r, unsigned char* g, unsigned char*b, unsigned char* interleaved, size_t channelPixels){    // get each channel and then interleave them in RGB order
+
+	size_t s = 0;
+	for(size_t idx = 0 ; idx < channelPixels  ; idx++){
+		s = idx * 3;
+		interleaved[s]	 = r[idx];
+		interleaved[s+1] = g[idx];
+		interleaved[s+2] = b[idx];
+	}
+}
+
+
+int main(int argc, char *argv[]){
+
+
+ //==================================== parse the ppm file and store each channel in memory ====================================//
+
+	ifstream infile;
+	infile.open( argv[1] , std::ios::in | std::ios::binary );   // open the binary file
+
+	if(infile.fail()){
+		std::cerr << "ERROR opening the ppm file" << endl;
+		exit(1);
+	}
+
+	unsigned int chnls = 0;				
+	std::string strReader = "";					// to read the type of file
+
+	infile >> strReader;
+
+	if(strReader == "P6")					// color image
+		chnls = 3;
+
+	else{
+		std::cerr << "Your ppm file is not supported by this project. Only P6 file type is supported " << endl;
+		exit(1);
+	}
+
+	std::string line;			// used to move the cursor to the next line when necessary
+	getline(infile,line);   // move the cursor to line 2
+	getline(infile,line);   // move the cursor to line 3
+
+	size_t cols;
+	size_t rows;
+
+	infile >> cols >> rows;   // get the number of columns and rows from the ppm file
+
+	getline(infile,line);		// move the cursor to line 4
+	getline(infile,line);		// move the cursor to line 5
+
+	char pixVal;
+	size_t twoDimSize = cols * rows;		// total num of pixels for each channel
+
+	unsigned char* red = (unsigned char*) malloc ( twoDimSize * sizeof(unsigned char) );			// allocating memory for each channel
+	unsigned char* green = (unsigned char*) malloc ( twoDimSize * sizeof(unsigned char) );
+	unsigned char* blue = (unsigned char*) malloc ( twoDimSize * sizeof(unsigned char) );
+
+	for(size_t i = 0 ; i < twoDimSize ; i++){
+
+		infile.get(pixVal);				// this function accepts only char type as input argument (I'm using this function because for some super weird reasons the operator ">>" skips reading the value 9)
+		red[i] = pixVal;				// first casts to unsinged char then stores the value
+
+		infile.get(pixVal);             // green channel
+		green[i] = pixVal;		
+
+		infile.get(pixVal);				// blue channel
+		blue[i] = pixVal;		
+	}
+
+	infile.close();
+
+
+
+
+
+	//=================================================== write the filter ===================================================//
+
+
+	int sigma = atoi(argv[2]);									// since we're dealing with digital framework we assume sigma is always an integer
+	int kSize = sigma * 6 + 1;									// to keep 99.7% of the Gaussian and make it odd
+
+	float* k = (float*) calloc (kSize, sizeof(float));			 // allocate memory for the kernel
+
+	int kMidIdx = ceil( kSize/2 );								// get the middle pixel index of the kernel
+	k += kMidIdx;												// move the pointer to the middle pixel of the kernel (to make the kernel index the same as the values we insert in the Gaussian formula)
+
+	float GaussNumerator = 0;
+	float GaussDenom = 0;
+	for(int j = -kMidIdx ; j <= kMidIdx ; j++){                 // calculating the Gaussian kernel
+
+		GaussNumerator = exp( -0.5 * pow( j/(double)sigma, 2 ) );
+		GaussDenom = sigma * sqrt(2*PI);
+		k[j] = GaussNumerator / GaussDenom;
+	}
+
+
+	cudaError_t error;
+	cudaDeviceProp prop;
+
+	error = cudaGetDeviceProperties(&prop, 0);
+	handleError(error, "getting the device properties");
+
+
+//============================== allocating memory on the device ==============================//
+
+	unsigned char* deviceRed;
+	unsigned char* deviceGreen;
+	unsigned char* deviceBlue;
+
+	error = cudaMalloc(&deviceRed, twoDimSize * sizeof(unsigned char));						// memory for red channel on the device
+	handleError(error, "allocating memory for red channel on the device");
+	
+	error = cudaMalloc(&deviceGreen, twoDimSize * sizeof(unsigned char));					// memory for green channel on the device
+	handleError(error, "allocating memory for green channel on the device");
+
+	error = cudaMalloc(&deviceBlue, twoDimSize * sizeof(unsigned char));					// memory for blue channel on the device
+	handleError(error, "allocating memory for blue channel on the device");
+
+
+	float* deviceFilter;
+
+	error = cudaMalloc(&deviceFilter, kSize * sizeof(float));								// memory for filter on the device
+	handleError(error, "allocating memory for the filter on the device");
+
+
+
+	unsigned char* deviceConvolvedRed;
+	unsigned char* deviceConvolvedGreen;
+	unsigned char* deviceConvolvedBlue;
+
+	error = cudaMalloc(&deviceConvolvedRed, twoDimSize * sizeof(unsigned char));				// memory for convolved red on the device
+	handleError(error, "allocating memory for convolved red channel on the device");
+	
+	error = cudaMalloc(&deviceConvolvedGreen, twoDimSize * sizeof(unsigned char));				// memory for convolved green on the device
+	handleError(error, "allocating memory for convolved green channel on the device");
+
+	error = cudaMalloc(&deviceConvolvedBlue, twoDimSize * sizeof(unsigned char));				// memory for convolved blue on the device
+	handleError(error, "allocating memory for convolved blue channel on the device");
+
+
+//====================================== copying data on the device ======================================//
+
+	error = cudaMemcpy(deviceRed, red, twoDimSize * sizeof(unsigned char), cudaMemcpyHostToDevice);					// copying red channel on the device
+	handleError(error, "copying red channel from host to device");
+
+	error = cudaMemcpy(deviceGreen, green, twoDimSize * sizeof(unsigned char), cudaMemcpyHostToDevice);				// copying green channel on the device
+	handleError(error, "copying green channel from host to device");
+
+	error = cudaMemcpy(deviceBlue, blue, twoDimSize * sizeof(unsigned char), cudaMemcpyHostToDevice);				// copying blue channel on the device
+	handleError(error, "copying blue channel from host to device");
+
+	
+	error = cudaMemcpy(deviceFilter, k, kSize * sizeof(float), cudaMemcpyHostToDevice);								// copying the filter on the device
+	handleError(error, "copying filter from host to device");
+
+
+//======================================== perform convolution ========================================//
+
+	double startCl = std::clock();                     // set the clock to start at this point
+
+	size_t threads = prop.maxThreadsPerBlock;
+	size_t blocks = ceil(twoDimSize/threads);
+
+
+	//========== convolve red channel
+	kernelConvolutionAcrossX<<<blocks,threads>>>(deviceRed, deviceFilter, deviceConvolvedRed, cols, rows, kMidIdx);						// across X
+	kernelConvolutionAcrossY<<<blocks,threads>>>(deviceConvolvedRed, deviceFilter, deviceConvolvedRed, cols, rows, kMidIdx);			// across Y  (I'm overwriting the convolution result across X by the results across Y dimension to save some space in memory)
+
+
+	//========== convolve green channel
+	kernelConvolutionAcrossX<<<blocks,threads>>>(deviceGreen, deviceFilter, deviceConvolvedGreen, cols, rows, kMidIdx);					// across X
+	kernelConvolutionAcrossY<<<blocks,threads>>>(deviceConvolvedGreen, deviceFilter, deviceConvolvedGreen, cols, rows, kMidIdx);		// across Y
+
+
+	//========== convolve blue channel
+	kernelConvolutionAcrossX<<<blocks,threads>>>(deviceBlue, deviceFilter, deviceConvolvedBlue, cols, rows, kMidIdx);					// across X
+	kernelConvolutionAcrossY<<<blocks,threads>>>(deviceConvolvedBlue, deviceFilter, deviceConvolvedBlue, cols, rows, kMidIdx);			// across Y
+
+
+
+//======================= getting the convolved channels for interleaving and final image creation =======================// 
+
+	unsigned char* hostConvolvedRed = (unsigned char*) malloc( twoDimSize * sizeof(unsigned char));				// memory for convolved red on the host
+	unsigned char* hostConvolvedGreen = (unsigned char*) malloc( twoDimSize * sizeof(unsigned char));				// memory for convolved green on the host
+	unsigned char* hostConvolvedBlue = (unsigned char*) malloc( twoDimSize * sizeof(unsigned char));				// memory for convolved blue on the host
+
+
+	error = cudaMemcpy(hostConvolvedRed, deviceConvolvedRed, twoDimSize * sizeof(unsigned char), cudaMemcpyDeviceToHost);		// copying convolved red channel from the device to the device
+	handleError(error, "copying the convolved red channel from device to host");
+
+
+
+	error = cudaMemcpy(hostConvolvedGreen, deviceConvolvedGreen, twoDimSize * sizeof(unsigned char), cudaMemcpyDeviceToHost);		// copying convolved green channel from the device to the device
+	handleError(error, "copying the convolved green channel from device to host");
+
+
+
+
+	error = cudaMemcpy(hostConvolvedBlue, deviceConvolvedBlue, twoDimSize * sizeof(unsigned char), cudaMemcpyDeviceToHost);		// copying convolved blue channel from the device to the device
+	handleError(error, "copying the convolved blue channel from device to host");
+
+	double endCl = std::clock();							// set the clock to end at this time
+
+	cout << endl << "convolution took approximately " << (endCl - startCl) /((double) CLOCKS_PER_SEC)<< " seconds" << endl;		 // calculate the convolution time in seconds
+
+	unsigned char* colorConvolved = (unsigned char*) malloc (twoDimSize * chnls * sizeof(unsigned char));			// allocate memory for the convolved color image
+
+	separateChannelsToRGBinterleaved ( hostConvolvedRed, hostConvolvedGreen, hostConvolvedBlue, colorConvolved, twoDimSize);	// interleave the convolved channels
+
+	stim::image<unsigned char> finalImage (colorConvolved, cols, rows, chnls);										// create an image and save it
+	finalImage.save("convolvedColorImage.bmp");
+
+	cout << endl << "your final image was created under the name 'convolvedColorImage'"  << endl;
+
+
+
+
+	return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
